@@ -1,8 +1,10 @@
 import { ConfigError } from "./errors.js";
+import { parseCookieHeader } from "./linkedin/cookies.js";
 
 export interface Config {
-  linkedinLiAt: string;
-  linkedinJsessionId: string;
+  linkedinCookies: Record<string, string>;
+  linkedinEmail: string | null;
+  linkedinPassword: string | null;
   apiKey: string | null;
   port: number;
   rateLimitPerMinute: number;
@@ -12,14 +14,15 @@ export interface Config {
   logLevel: string;
 }
 
-function required(name: string, value: string | undefined): string {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    throw new ConfigError(
-      `Missing ${name}. Copy .env.example to .env and add your LinkedIn cookies.`,
-    );
+function optional(value: string | undefined): string | null {
+  let trimmed = value?.trim() ?? "";
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    trimmed = trimmed.slice(1, -1);
   }
-  return trimmed;
+  return trimmed ? trimmed : null;
 }
 
 function integer(name: string, value: string | undefined, fallback: number): number {
@@ -33,11 +36,34 @@ function integer(name: string, value: string | undefined, fallback: number): num
   return parsed;
 }
 
+export function cookiesFromEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const header = optional(env.LINKEDIN_COOKIE);
+  const cookies = header ? parseCookieHeader(header) : {};
+  const liAt = optional(env.LINKEDIN_LI_AT);
+  if (liAt) {
+    cookies.li_at = liAt.includes("=") ? (parseCookieHeader(liAt).li_at ?? liAt) : liAt;
+  }
+  const jsession = optional(env.LINKEDIN_JSESSIONID);
+  if (jsession) {
+    cookies.JSESSIONID = jsession;
+  }
+  return cookies;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const linkedinCookies = cookiesFromEnv(env);
+  const linkedinEmail = optional(env.LINKEDIN_EMAIL);
+  const linkedinPassword = optional(env.LINKEDIN_PASSWORD);
+  if (!linkedinCookies.li_at && !(linkedinEmail && linkedinPassword)) {
+    throw new ConfigError(
+      "Missing LinkedIn session. Set LINKEDIN_LI_AT (or LINKEDIN_COOKIE) from a browser you own, or set LINKEDIN_EMAIL and LINKEDIN_PASSWORD.",
+    );
+  }
   return {
-    linkedinLiAt: required("LINKEDIN_LI_AT", env.LINKEDIN_LI_AT),
-    linkedinJsessionId: required("LINKEDIN_JSESSIONID", env.LINKEDIN_JSESSIONID),
-    apiKey: env.API_KEY?.trim() || null,
+    linkedinCookies,
+    linkedinEmail,
+    linkedinPassword,
+    apiKey: optional(env.API_KEY),
     port: integer("PORT", env.PORT, 8080),
     rateLimitPerMinute: integer("RATE_LIMIT_PER_MINUTE", env.RATE_LIMIT_PER_MINUTE, 10),
     cacheTtlSeconds: integer("CACHE_TTL_SECONDS", env.CACHE_TTL_SECONDS, 600),
@@ -47,7 +73,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       env.LINKEDIN_MIN_INTERVAL_MS,
       250,
     ),
-    logLevel: env.LOG_LEVEL?.trim() || "info",
+    logLevel: optional(env.LOG_LEVEL) ?? "info",
   };
 }
 
@@ -67,8 +93,9 @@ export function normalizeJsessionId(raw: string): {
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
   return {
-    linkedinLiAt: "test-li-at",
-    linkedinJsessionId: "ajax:1",
+    linkedinCookies: { li_at: "test-li-at" },
+    linkedinEmail: "test@example.com",
+    linkedinPassword: "test-password",
     apiKey: null,
     port: 8080,
     rateLimitPerMinute: 60,

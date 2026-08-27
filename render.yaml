@@ -9,7 +9,11 @@ services:
         value: 8080
       - key: LINKEDIN_LI_AT
         sync: false
-      - key: LINKEDIN_JSESSIONID
+      - key: LINKEDIN_COOKIE
+        sync: false
+      - key: LINKEDIN_EMAIL
+        sync: false
+      - key: LINKEDIN_PASSWORD
         sync: false
       - key: API_KEY
         sync: false

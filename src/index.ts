@@ -27,11 +27,19 @@ function loadEnvFile(): void {
 
 loadEnvFile();
 
-const config = loadConfig();
-const client = new LinkedInClient(config);
-const service = new ProfileService(client, config);
-const app = createApp({ config, service });
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const client = new LinkedInClient(config);
+  await client.authenticate();
+  const service = new ProfileService(client, config);
+  const app = createApp({ config, service });
 
-serve({ fetch: app.fetch, port: config.port }, (info) => {
-  console.log(`profile-lens listening on http://localhost:${info.port}`);
+  serve({ fetch: app.fetch, port: config.port }, (info) => {
+    console.log(`profile-lens listening on http://localhost:${info.port}`);
+  });
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
 });

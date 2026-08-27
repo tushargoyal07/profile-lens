@@ -2,6 +2,7 @@ import type { ProfileResponse } from "../api/schemas.js";
 import type { Config } from "../config.js";
 import { parseProfileUrl } from "../domain/url.js";
 import {
+  LoginError,
   ProfileNotFoundError,
   SessionExpiredError,
   UpstreamBlockedError,
@@ -136,6 +137,7 @@ export class ProfileService {
     } catch (error) {
       if (
         error instanceof SessionExpiredError ||
+        error instanceof LoginError ||
         error instanceof UpstreamBlockedError ||
         error instanceof UpstreamRateLimitedError
       ) {

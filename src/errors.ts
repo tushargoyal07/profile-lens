@@ -63,9 +63,19 @@ export class RateLimitedError extends ProfileLensError {
   }
 }
 
+export class LoginError extends ProfileLensError {
+  constructor(detail: string) {
+    super(detail, {
+      status: 503,
+      errorType: "login-failed",
+      title: "LinkedIn login failed",
+    });
+  }
+}
+
 export class SessionExpiredError extends ProfileLensError {
   constructor(
-    detail = "The LinkedIn session cookie was rejected. Refresh LINKEDIN_LI_AT.",
+    detail = "LinkedIn rejected the session. Paste a fresh li_at cookie from your browser.",
   ) {
     super(detail, {
       status: 503,

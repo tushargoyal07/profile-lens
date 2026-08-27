@@ -2,12 +2,16 @@ import { Impit } from "impit";
 import type { Config } from "../config.js";
 import { normalizeJsessionId } from "../config.js";
 import {
+  LoginError,
   SessionExpiredError,
   UpstreamBlockedError,
   UpstreamError,
   UpstreamRateLimitedError,
 } from "../errors.js";
 import { isObject, type JsonObject } from "../lib/json.js";
+import { loginWithPassword } from "./auth.js";
+import { ingestSetCookieHeaders, MemoryCookieJar } from "./cookies.js";
+import { loadStoredSession, saveStoredSession } from "./session-store.js";
 
 const BASE = "https://www.linkedin.com/voyager/api";
 
@@ -30,22 +34,33 @@ const TRACK = JSON.stringify({
 });
 
 export class LinkedInClient {
+  private readonly config: Config;
+  private readonly jar: MemoryCookieJar;
   private readonly impit: Impit;
-  private readonly cookieHeader: string;
-  private readonly csrfToken: string;
+  private csrfToken = "";
   private readonly minIntervalMs: number;
   private lastRequestAt = 0;
+  private loginInFlight: Promise<void> | null = null;
 
   constructor(config: Config) {
-    const session = normalizeJsessionId(config.linkedinJsessionId);
-    this.csrfToken = session.csrfToken;
-    this.cookieHeader = `li_at=${config.linkedinLiAt}; JSESSIONID=${session.cookieValue}`;
+    this.config = config;
+    this.jar = new MemoryCookieJar();
     this.minIntervalMs = config.linkedinMinIntervalMs;
     this.impit = new Impit({
       browser: "chrome",
       timeout: config.requestTimeoutMs,
       followRedirects: true,
+      cookieJar: this.jar,
     });
+  }
+
+  async authenticate(): Promise<void> {
+    if (!this.loginInFlight) {
+      this.loginInFlight = this.performLogin().finally(() => {
+        this.loginInFlight = null;
+      });
+    }
+    await this.loginInFlight;
   }
 
   async ping(): Promise<JsonObject> {
@@ -82,7 +97,111 @@ export class LinkedInClient {
     );
   }
 
-  private async getJson(path: string, publicIdentifier?: string): Promise<JsonObject> {
+  private async performLogin(): Promise<void> {
+    if (this.config.linkedinCookies.li_at) {
+      await this.authenticateWithCookies(this.config.linkedinCookies, "environment");
+      return;
+    }
+
+    const stored = await loadStoredSession();
+    if (stored?.li_at) {
+      try {
+        await this.authenticateWithCookies(stored, "data/linkedin-session.json");
+        return;
+      } catch {
+        this.jar.clear();
+        this.csrfToken = "";
+      }
+    }
+
+    if (!this.config.linkedinEmail || !this.config.linkedinPassword) {
+      throw new LoginError(
+        "No usable LinkedIn cookie. Set LINKEDIN_LI_AT or LINKEDIN_COOKIE from a browser session you own.",
+      );
+    }
+
+    const session = await loginWithPassword(
+      this.impit,
+      this.jar,
+      this.config.linkedinEmail,
+      this.config.linkedinPassword,
+    );
+    this.csrfToken = normalizeJsessionId(session.jsessionId).csrfToken;
+    await saveStoredSession(this.jar.snapshot());
+  }
+
+  private async authenticateWithCookies(
+    cookies: Record<string, string>,
+    source: string,
+  ): Promise<void> {
+    this.jar.clear();
+    this.jar.load(cookies);
+    if (!(await this.hydrateCsrf())) {
+      throw new LoginError(
+        "LinkedIn did not issue a JSESSIONID for the provided cookie. Copy JSESSIONID as well, or paste the full Cookie header into LINKEDIN_COOKIE.",
+      );
+    }
+    if (!(await this.probeSession())) {
+      throw new LoginError(
+        "LinkedIn rejected the session cookie. Copy a fresh li_at from DevTools → Application → Cookies → linkedin.com.",
+      );
+    }
+    console.error(`LinkedIn session loaded from ${source}`);
+  }
+
+  private async hydrateCsrf(forceRefresh = false): Promise<boolean> {
+    if (forceRefresh || !this.jar.get("JSESSIONID")) {
+      try {
+        const response = await this.impit.fetch("https://www.linkedin.com/feed/", {
+          method: "GET",
+          headers: {
+            accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "accept-language": "en-US,en;q=0.9",
+          },
+        });
+        ingestSetCookieHeaders(response.headers, response.url, this.jar);
+        await response.text();
+      } catch {
+        // Probe will fail next if the cookie is unusable.
+      }
+    }
+    const jsession = this.jar.get("JSESSIONID");
+    if (!jsession) {
+      return false;
+    }
+    this.csrfToken = normalizeJsessionId(jsession).csrfToken;
+    return true;
+  }
+
+  private async probeSession(): Promise<boolean> {
+    if (!this.csrfToken) {
+      return false;
+    }
+    try {
+      const response = await this.impit.fetch(`${BASE}/me`, {
+        method: "GET",
+        headers: {
+          accept: "application/vnd.linkedin.normalized+json+2.1",
+          "accept-language": "en-US,en;q=0.9",
+          "csrf-token": this.csrfToken,
+          "x-restli-protocol-version": "2.0.0",
+          referer: "https://www.linkedin.com/feed/",
+        },
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  private async getJson(
+    path: string,
+    publicIdentifier?: string,
+    retried = false,
+  ): Promise<JsonObject> {
+    if (!this.csrfToken) {
+      await this.authenticate();
+    }
     await this.throttle();
     const url = `${BASE}${path}`;
     const referer = publicIdentifier
@@ -100,7 +219,6 @@ export class LinkedInClient {
           "x-restli-protocol-version": "2.0.0",
           "x-li-lang": "en_US",
           "x-li-track": TRACK,
-          cookie: this.cookieHeader,
           referer,
         },
       });
@@ -110,6 +228,14 @@ export class LinkedInClient {
     }
 
     if (response.status === 401 || response.status === 403) {
+      if (!retried) {
+        if (this.config.linkedinCookies.li_at) {
+          await this.hydrateCsrf(true);
+          return this.getJson(path, publicIdentifier, true);
+        }
+        await this.authenticate();
+        return this.getJson(path, publicIdentifier, true);
+      }
       throw new SessionExpiredError();
     }
     if (response.status === 429) {

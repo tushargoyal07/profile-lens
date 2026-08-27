@@ -5,9 +5,18 @@ import { InvalidProfileUrlError } from "../src/errors.js";
 import { buildIndex, collectionElements, field } from "../src/linkedin/restli.js";
 import { parseDashProfile, parseProfileView } from "../src/linkedin/parser.js";
 import { createApp } from "../src/app.js";
-import { testConfig } from "../src/config.js";
+import { loadConfig, testConfig } from "../src/config.js";
 import type { ProfileResponse } from "../src/api/schemas.js";
 import type { JsonObject } from "../src/lib/json.js";
+import {
+  allHiddenInputs,
+  challengeKind,
+  challengeUrlFromPayload,
+  hiddenInputValue,
+  interpretAuthenticateJson,
+  parseLinkedInPayload,
+} from "../src/linkedin/auth.js";
+import { MemoryCookieJar, parseCookieHeader } from "../src/linkedin/cookies.js";
 
 const dash = JSON.parse(
   readFileSync(new URL("./fixtures/dash-profile.json", import.meta.url), "utf8"),
@@ -137,5 +146,106 @@ describe("HTTP API", () => {
     });
     const res = await app.request("http://localhost/v1/profiles?url=https://www.linkedin.com/in/ada");
     expect(res.status).toBe(401);
+  });
+});
+
+describe("config", () => {
+  it("requires a LinkedIn cookie or email and password", () => {
+    expect(() => loadConfig({})).toThrow(/LINKEDIN_LI_AT|LINKEDIN_COOKIE|session/);
+    expect(() => loadConfig({ LINKEDIN_EMAIL: "a@b.com" })).toThrow(/session/);
+    expect(
+      loadConfig({ LINKEDIN_EMAIL: "a@b.com", LINKEDIN_PASSWORD: "secret" }).linkedinEmail,
+    ).toBe("a@b.com");
+  });
+
+  it("accepts a bare li_at cookie without a password", () => {
+    const cfg = loadConfig({ LINKEDIN_LI_AT: "AQED-token" });
+    expect(cfg.linkedinCookies.li_at).toBe("AQED-token");
+    expect(cfg.linkedinEmail).toBeNull();
+    expect(cfg.linkedinPassword).toBeNull();
+  });
+
+  it("parses a full Cookie header", () => {
+    const cfg = loadConfig({
+      LINKEDIN_COOKIE: 'Cookie: li_at=token; JSESSIONID="ajax:1"; Path=/',
+    });
+    expect(cfg.linkedinCookies).toMatchObject({
+      li_at: "token",
+      JSESSIONID: '"ajax:1"',
+    });
+    expect(cfg.linkedinCookies.Path).toBeUndefined();
+  });
+});
+
+describe("LinkedIn login helpers", () => {
+  it("reads hidden form fields from either attribute order", () => {
+    expect(
+      allHiddenInputs(
+        `<input type="hidden" name="loginCsrfParam" value="abc123"><input type="text" name="session_key" value="skip">`,
+      ),
+    ).toEqual({ loginCsrfParam: "abc123" });
+    expect(
+      hiddenInputValue(
+        `<input type="hidden" name="loginCsrfParam" value="abc123">`,
+        "loginCsrfParam",
+      ),
+    ).toBe("abc123");
+    expect(
+      hiddenInputValue(
+        `<input value="xyz" type="hidden" name="loginCsrfParam">`,
+        "loginCsrfParam",
+      ),
+    ).toBe("xyz");
+  });
+
+  it("interprets LinkedIn authenticate JSON", () => {
+    expect(interpretAuthenticateJson({ login_result: "PASS" }, true)).toEqual({ ok: true });
+    expect(interpretAuthenticateJson({ login_result: "PASS" }, false).ok).toBe(false);
+    const bad = interpretAuthenticateJson({ login_result: "BAD_USERNAME_OR_PASSWORD" }, false);
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) {
+      expect(bad.invalidCredentials).toBe(true);
+    }
+    const challenge = interpretAuthenticateJson({ login_result: "CHALLENGE" }, false);
+    expect(challenge.ok).toBe(false);
+    if (!challenge.ok) {
+      expect(challenge.reason).toMatch(/challenge/i);
+    }
+  });
+
+  it("stores cookies by name", () => {
+    const jar = new MemoryCookieJar();
+    jar.setCookie('JSESSIONID="ajax:1"; Path=/; Secure', "https://www.linkedin.com/");
+    jar.setCookie("li_at=token; HttpOnly", "https://www.linkedin.com/");
+    expect(jar.get("JSESSIONID")).toBe('"ajax:1"');
+    expect(jar.getCookieString("https://www.linkedin.com/")).toContain("li_at=token");
+  });
+
+  it("parses a browser Cookie header or a bare li_at value", () => {
+    expect(parseCookieHeader("AQED-only")).toEqual({ li_at: "AQED-only" });
+    expect(parseCookieHeader('li_at=token; JSESSIONID="ajax:9"; Secure')).toEqual({
+      li_at: "token",
+      JSESSIONID: '"ajax:9"',
+    });
+  });
+
+  it("parses LinkedIn JSON with an XSS prefix", () => {
+    expect(parseLinkedInPayload(`)]}',\n{"login_result":"CHALLENGE"}`)).toEqual({
+      login_result: "CHALLENGE",
+    });
+    expect(parseLinkedInPayload("<html>checkpoint</html>")).toBeNull();
+  });
+
+  it("reads a challenge URL and classifies app approval pages", () => {
+    expect(
+      challengeUrlFromPayload({
+        login_result: "CHALLENGE",
+        challenge_url: "/checkpoint/challenge/abc",
+      }),
+    ).toBe("https://www.linkedin.com/checkpoint/challenge/abc");
+    expect(
+      challengeKind("Check your LinkedIn app", "https://www.linkedin.com/checkpoint/challenge/x"),
+    ).toBe("app");
+    expect(challengeKind('<body id="error404">', "https://www.linkedin.com/404")).toBe("dead");
   });
 });

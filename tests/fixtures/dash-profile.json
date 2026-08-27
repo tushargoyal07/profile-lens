@@ -1,0 +1,98 @@
+{
+  "data": {
+    "*elements": ["urn:li:fsd_profile:ACoAAA"],
+    "$type": "com.linkedin.restli.common.CollectionResponse"
+  },
+  "included": [
+    {
+      "entityUrn": "urn:li:fsd_profile:ACoAAA",
+      "$type": "com.linkedin.voyager.dash.identity.profile.Profile",
+      "firstName": "Ada",
+      "lastName": "Lovelace",
+      "headline": "Mathematician",
+      "publicIdentifier": "ada-lovelace",
+      "summary": "Wrote the first algorithm.",
+      "geoLocationName": "London, England",
+      "industry": "Computer Software",
+      "profilePicture": {
+        "displayImageReference": {
+          "vectorImage": {
+            "rootUrl": "https://media.licdn.com/img/",
+            "artifacts": [
+              { "width": 100, "fileIdentifyingUrlPathSegment": "small.jpg" },
+              { "width": 800, "fileIdentifyingUrlPathSegment": "large.jpg" }
+            ]
+          }
+        }
+      },
+      "*profilePositionGroups": "urn:li:collection:positions",
+      "*profileEducations": "urn:li:collection:educations",
+      "*profileSkills": "urn:li:collection:skills",
+      "*profileCertifications": "urn:li:collection:certs",
+      "*profileLanguages": "urn:li:collection:langs"
+    },
+    {
+      "entityUrn": "urn:li:collection:positions",
+      "$type": "com.linkedin.restli.common.CollectionResponse",
+      "*elements": ["urn:li:fsd_profilePosition:(ACoAAA,1)"]
+    },
+    {
+      "entityUrn": "urn:li:fsd_profilePosition:(ACoAAA,1)",
+      "$type": "com.linkedin.voyager.dash.identity.profile.Position",
+      "title": "Analyst",
+      "companyName": "Analytical Engines",
+      "description": "Wrote programs for the engine.",
+      "geoLocationName": "London",
+      "dateRange": {
+        "start": { "year": 1842, "month": 1 },
+        "end": { "year": 1843, "month": 12 }
+      }
+    },
+    {
+      "entityUrn": "urn:li:collection:educations",
+      "$type": "com.linkedin.restli.common.CollectionResponse",
+      "*elements": ["urn:li:fsd_profileEducation:(ACoAAA,1)"]
+    },
+    {
+      "entityUrn": "urn:li:fsd_profileEducation:(ACoAAA,1)",
+      "$type": "com.linkedin.voyager.dash.identity.profile.Education",
+      "schoolName": "University of London",
+      "degreeName": "Mathematics",
+      "fieldOfStudy": "Analysis",
+      "dateRange": { "start": { "year": 1830 }, "end": { "year": 1835 } }
+    },
+    {
+      "entityUrn": "urn:li:collection:skills",
+      "$type": "com.linkedin.restli.common.CollectionResponse",
+      "*elements": ["urn:li:fsd_skill:(ACoAAA,1)"]
+    },
+    {
+      "entityUrn": "urn:li:fsd_skill:(ACoAAA,1)",
+      "$type": "com.linkedin.voyager.dash.identity.profile.Skill",
+      "name": "Algorithms",
+      "endorsementCount": 42
+    },
+    {
+      "entityUrn": "urn:li:collection:certs",
+      "$type": "com.linkedin.restli.common.CollectionResponse",
+      "*elements": ["urn:li:fsd_cert:(ACoAAA,1)"]
+    },
+    {
+      "entityUrn": "urn:li:fsd_cert:(ACoAAA,1)",
+      "$type": "com.linkedin.voyager.dash.identity.profile.Certification",
+      "name": "Engine Programming",
+      "authority": "Babbage Institute"
+    },
+    {
+      "entityUrn": "urn:li:collection:langs",
+      "$type": "com.linkedin.restli.common.CollectionResponse",
+      "*elements": ["urn:li:fsd_lang:(ACoAAA,1)"]
+    },
+    {
+      "entityUrn": "urn:li:fsd_lang:(ACoAAA,1)",
+      "$type": "com.linkedin.voyager.dash.identity.profile.Language",
+      "name": "English",
+      "proficiency": "NATIVE_OR_BILINGUAL"
+    }
+  ]
+}

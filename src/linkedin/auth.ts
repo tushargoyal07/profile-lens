@@ -336,6 +336,14 @@ async function tryAuthenticate(
   if (interpreted.ok && session) {
     return { session, invalidCredentials: false, reason: "", pollUrl: null };
   }
+  if (interpreted.ok) {
+    return {
+      session: null,
+      invalidCredentials: false,
+      reason: "LinkedIn login succeeded without a session cookie.",
+      pollUrl: null,
+    };
+  }
   if (interpreted.invalidCredentials) {
     return {
       session: null,

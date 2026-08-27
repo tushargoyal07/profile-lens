@@ -10,7 +10,7 @@ import {
 } from "../errors.js";
 import { isObject, type JsonObject } from "../lib/json.js";
 import { loginWithPassword } from "./auth.js";
-import { ingestSetCookieHeaders, MemoryCookieJar } from "./cookies.js";
+import { MemoryCookieJar } from "./cookies.js";
 import { loadStoredSession, saveStoredSession } from "./session-store.js";
 
 const BASE = "https://www.linkedin.com/voyager/api";
@@ -138,33 +138,13 @@ export class LinkedInClient {
     this.jar.load(cookies);
     if (!(await this.hydrateCsrf())) {
       throw new LoginError(
-        "LinkedIn did not issue a JSESSIONID for the provided cookie. Copy JSESSIONID as well, or paste the full Cookie header into LINKEDIN_COOKIE.",
+        "Missing JSESSIONID. Copy it from the same browser session as li_at.",
       );
     }
-    if (!(await this.probeSession())) {
-      throw new LoginError(
-        "LinkedIn rejected the session cookie. Copy a fresh li_at from DevTools → Application → Cookies → linkedin.com.",
-      );
-    }
-    console.error(`LinkedIn session loaded from ${source}`);
+    console.error(`LinkedIn cookies loaded from ${source} (first Voyager call is the profile request)`);
   }
 
-  private async hydrateCsrf(forceRefresh = false): Promise<boolean> {
-    if (forceRefresh || !this.jar.get("JSESSIONID")) {
-      try {
-        const response = await this.impit.fetch("https://www.linkedin.com/feed/", {
-          method: "GET",
-          headers: {
-            accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "accept-language": "en-US,en;q=0.9",
-          },
-        });
-        ingestSetCookieHeaders(response.headers, response.url, this.jar);
-        await response.text();
-      } catch {
-        // Probe will fail next if the cookie is unusable.
-      }
-    }
+  private async hydrateCsrf(): Promise<boolean> {
     const jsession = this.jar.get("JSESSIONID");
     if (!jsession) {
       return false;
@@ -194,11 +174,7 @@ export class LinkedInClient {
     }
   }
 
-  private async getJson(
-    path: string,
-    publicIdentifier?: string,
-    retried = false,
-  ): Promise<JsonObject> {
+  private async getJson(path: string, publicIdentifier?: string): Promise<JsonObject> {
     if (!this.csrfToken) {
       await this.authenticate();
     }
@@ -227,14 +203,15 @@ export class LinkedInClient {
       throw new UpstreamError(message);
     }
 
-    if (response.status === 401 || response.status === 403) {
-      if (!retried) {
-        if (this.config.linkedinCookies.li_at) {
-          await this.hydrateCsrf(true);
-          return this.getJson(path, publicIdentifier, true);
-        }
-        await this.authenticate();
-        return this.getJson(path, publicIdentifier, true);
+    if (response.status === 401) {
+      throw new SessionExpiredError();
+    }
+    if (response.status === 403) {
+      if (path === "/me" || path.endsWith("/me")) {
+        throw new SessionExpiredError();
+      }
+      if (await this.probeSession()) {
+        return { status: 403 };
       }
       throw new SessionExpiredError();
     }

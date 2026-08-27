@@ -11,6 +11,7 @@ export interface Config {
   cacheTtlSeconds: number;
   requestTimeoutMs: number;
   linkedinMinIntervalMs: number;
+  profileCooldownMs: number;
   logLevel: string;
 }
 
@@ -71,8 +72,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     linkedinMinIntervalMs: integer(
       "LINKEDIN_MIN_INTERVAL_MS",
       env.LINKEDIN_MIN_INTERVAL_MS,
-      250,
+      1000,
     ),
+    profileCooldownMs: integer("PROFILE_COOLDOWN_MS", env.PROFILE_COOLDOWN_MS, 8000),
     logLevel: optional(env.LOG_LEVEL) ?? "info",
   };
 }
@@ -88,21 +90,5 @@ export function normalizeJsessionId(raw: string): {
   return {
     cookieValue: `"${value}"`,
     csrfToken: value,
-  };
-}
-
-export function testConfig(overrides: Partial<Config> = {}): Config {
-  return {
-    linkedinCookies: { li_at: "test-li-at" },
-    linkedinEmail: "test@example.com",
-    linkedinPassword: "test-password",
-    apiKey: null,
-    port: 8080,
-    rateLimitPerMinute: 60,
-    cacheTtlSeconds: 0,
-    requestTimeoutMs: 5000,
-    linkedinMinIntervalMs: 0,
-    logLevel: "error",
-    ...overrides,
   };
 }

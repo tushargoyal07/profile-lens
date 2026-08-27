@@ -3,7 +3,6 @@ import type { Config } from "../config.js";
 import { parseProfileUrl } from "../domain/url.js";
 import {
   LoginError,
-  ProfileNotFoundError,
   SessionExpiredError,
   UpstreamBlockedError,
   UpstreamRateLimitedError,
@@ -13,28 +12,52 @@ import { DASH_DECORATIONS, type LinkedInClient } from "../linkedin/client.js";
 import {
   isThinProfile,
   mergeProfiles,
-  parseContactInfo,
   parseDashProfile,
   parseProfileView,
   parseSkillsPayload,
 } from "../linkedin/parser.js";
 import { TtlCache } from "./limits.js";
+import { readProfileCache, writeProfileCacheEntry } from "./profile-cache.js";
 
 export class ProfileService {
   private readonly cache: TtlCache<ProfileResponse>;
+  private readonly cooldownMs: number;
+  private lastLookupAt = 0;
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly client: LinkedInClient,
     config: Config,
   ) {
     this.cache = new TtlCache(config.cacheTtlSeconds * 1000);
+    this.cooldownMs = config.profileCooldownMs;
   }
 
   async lookup(rawUrl: string): Promise<ProfileResponse> {
+    const run = this.queue.then(() => this.lookupOne(rawUrl));
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async lookupOne(rawUrl: string): Promise<ProfileResponse> {
     const ref = parseProfileUrl(rawUrl);
-    const cached = this.cache.get(ref.publicIdentifier.toLowerCase());
+    const key = ref.publicIdentifier.toLowerCase();
+    const cached = this.cache.get(key);
     if (cached) {
       return cached;
+    }
+    const disk = await readProfileCache();
+    if (disk[key]) {
+      this.cache.set(key, disk[key]);
+      return disk[key];
+    }
+
+    const wait = this.cooldownMs - (Date.now() - this.lastLookupAt);
+    if (this.lastLookupAt > 0 && wait > 0) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
     }
 
     const sources: string[] = [];
@@ -47,15 +70,17 @@ export class ProfileService {
 
     if (isThinProfile(parsed)) {
       const view = await this.safe(() => this.client.getProfileView(ref.publicIdentifier));
-      if (view && view.status !== 404) {
+      if (view && view.status !== 404 && view.status !== 403) {
         sources.push("identity.profiles.profileView");
         parsed = mergeProfiles(parsed ?? {}, parseProfileView(view, ref.publicIdentifier));
       }
     }
 
+    this.lastLookupAt = Date.now();
+
     if (!parsed?.profile) {
-      throw new ProfileNotFoundError(
-        `No LinkedIn profile was found for '${ref.publicIdentifier}'.`,
+      throw new SessionExpiredError(
+        "LinkedIn used up this session after a previous lookup (one live scrape per cookie is typical). Paste a fresh li_at and JSESSIONID for a new profile. Profiles already fetched are served from cache without calling LinkedIn.",
       );
     }
 
@@ -63,28 +88,10 @@ export class ProfileService {
 
     if (!parsed.skills?.length) {
       const skills = await this.safe(() => this.client.getSkills(ref.publicIdentifier));
-      if (skills && skills.status !== 404) {
+      if (skills && skills.status !== 404 && skills.status !== 403) {
         sources.push("identity.profiles.skills");
         parsed = { ...parsed, skills: parseSkillsPayload(skills) };
       }
-    }
-
-    const contact = await this.safe(() => this.client.getContactInfo(ref.publicIdentifier));
-    if (contact && contact.status !== 404) {
-      sources.push("identity.profiles.profileContactInfo");
-      const extra = parseContactInfo(contact);
-      profile = {
-        ...profile,
-        contact: {
-          email: profile.contact.email ?? extra.email,
-          websites: profile.contact.websites.length
-            ? profile.contact.websites
-            : extra.websites,
-          twitter: profile.contact.twitter.length
-            ? profile.contact.twitter
-            : extra.twitter,
-        },
-      };
     }
 
     const result: ProfileResponse = {
@@ -110,6 +117,7 @@ export class ProfileService {
     };
 
     this.cache.set(ref.publicIdentifier.toLowerCase(), result);
+    await writeProfileCacheEntry(ref.publicIdentifier, result);
     return result;
   }
 
@@ -121,7 +129,7 @@ export class ProfileService {
       const body = await this.safe(() =>
         this.client.getDashProfile(publicIdentifier, decoration),
       );
-      if (!body || body.status === 404) {
+      if (!body || body.status === 404 || body.status === 403) {
         continue;
       }
       sources.push(`identity.dash.profiles:${decoration.split(".").pop()}`);

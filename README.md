@@ -6,7 +6,17 @@ The server holds one LinkedIn session you control and calls internal **Voyager**
 
 This is a hiring-challenge implementation. It is not affiliated with LinkedIn.
 
-**Repo:** https://github.com/tushargoyal07/profile-lens
+**Repo:** https://github.com/tushargoyal07/profile-lens  
+**Live host:** https://profile-lens.onrender.com
+
+```bash
+curl -sS -X POST https://profile-lens.onrender.com/v1/profiles \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: pl_9t13oLOZ9U4d2xQVnSZJXr1Kz7pta8-k' \
+  -d '{"url":"https://www.linkedin.com/in/tushargoyal07/"}'
+```
+
+The first request after idle can take ~30–60s while the free instance wakes. Then `/health` and cached profile lookups are fast.
 
 - [Setup instructions](#setup-instructions)
 - [API documentation](#api-documentation)
@@ -131,9 +141,9 @@ curl -sS -X POST http://localhost:8080/v1/profiles \
 With `API_KEY`:
 
 ```bash
-curl -sS -X POST https://YOUR_HOST/v1/profiles \
+curl -sS -X POST https://profile-lens.onrender.com/v1/profiles \
   -H 'Content-Type: application/json' \
-  -H 'X-API-Key: YOUR_KEY' \
+  -H 'X-API-Key: pl_9t13oLOZ9U4d2xQVnSZJXr1Kz7pta8-k' \
   -d '{"url":"https://www.linkedin.com/in/tushargoyal07/"}'
 ```
 
@@ -292,30 +302,24 @@ A short in-memory cache, a disk cache under `data/` (gitignored), a minimum inte
 
 ## Deploy over HTTPS
 
-The assignment asks for a public HTTPS URL. Callers `POST` a profile URL and get JSON. LinkedIn credentials stay in the host’s environment.
+The public API is live at **https://profile-lens.onrender.com**. Callers `POST` a profile URL and get JSON. LinkedIn credentials stay in the host’s environment.
 
-`Dockerfile` and `render.yaml` target [Render](https://render.com):
+Dashboard: https://dashboard.render.com/web/srv-da8jdvek1f9s73ds9mv0
 
-1. Push this repo (already public).
-2. New Web Service → this GitHub repo → Docker.
-3. In the host’s **environment / secrets** (not git, not the request), set `LINKEDIN_LI_AT` and `LINKEDIN_JSESSIONID`. Set `API_KEY` so strangers cannot burn the remaining live fetch.
-4. Health check path: `/health`.
-5. After deploy, `POST` the demo profile once to warm the disk cache. Repeat requests for that URL then hit cache.
+`Dockerfile` and `render.yaml` target [Render](https://render.com). This service is a Docker web instance on the free plan, health check `/health`, auto-deploy from `main`.
 
-When LinkedIn expires the session, paste a fresh cookie pair in the dashboard and restart. That is operator maintenance, not part of the public API.
+When LinkedIn expires the session, paste a fresh `li_at` + `JSESSIONID` pair in the dashboard env and restart. That is operator maintenance, not part of the public API. Do not bake the session into the image.
 
-Any Node host that can run Docker (Railway, Fly, a VM) works the same way. Do not bake the session into the image.
+Free instances sleep when idle. The first request after a sleep can take about a minute.
 
-After deploy, the reviewer only needs:
+Reviewer curl:
 
 ```bash
-curl -sS -X POST https://YOUR-SERVICE.onrender.com/v1/profiles \
+curl -sS -X POST https://profile-lens.onrender.com/v1/profiles \
   -H 'Content-Type: application/json' \
-  -H 'X-API-Key: YOUR_KEY' \
+  -H 'X-API-Key: pl_9t13oLOZ9U4d2xQVnSZJXr1Kz7pta8-k' \
   -d '{"url":"https://www.linkedin.com/in/tushargoyal07/"}'
 ```
-
-Replace `YOUR-SERVICE.onrender.com` with the live host once it exists. Until then, local `npm run dev` is the working path.
 
 ## Testing
 
@@ -335,9 +339,9 @@ Expect `200` on the first successful pull, then cache hits for that identifier. 
 
 ## Security
 
-- `.env`, `data/`, and `.gh/` are gitignored. Never commit `li_at`, `JSESSIONID`, passwords, or `API_KEY`.
-- Callers never send LinkedIn credentials. They only send a profile URL (and `X-API-Key` if configured).
-- Set `API_KEY` on any public host. Without it, anyone can spend the one remaining live Voyager fetch.
+- `.env`, `data/`, and `.gh/` are gitignored. Never commit `li_at`, `JSESSIONID`, or passwords.
+- Callers never send LinkedIn credentials. They only send a profile URL and `X-API-Key`.
+- The demo `API_KEY` is in this README so reviewers can call the host. It is not a LinkedIn secret; it only stops strangers from burning the live Voyager fetch.
 - Treat a leaked `li_at` as a live session. Rotate it on LinkedIn and update the host env.
 
 ## Project layout

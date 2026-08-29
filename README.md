@@ -12,7 +12,6 @@ This is a hiring-challenge implementation. It is not affiliated with LinkedIn.
 ```bash
 curl -sS -X POST https://profile-lens.onrender.com/v1/profiles \
   -H 'Content-Type: application/json' \
-  -H 'X-API-Key: pl_9t13oLOZ9U4d2xQVnSZJXr1Kz7pta8-k' \
   -d '{"url":"https://www.linkedin.com/in/tushargoyal07/"}'
 ```
 

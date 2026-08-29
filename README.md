@@ -142,7 +142,6 @@ With `API_KEY`:
 ```bash
 curl -sS -X POST https://profile-lens.onrender.com/v1/profiles \
   -H 'Content-Type: application/json' \
-  -H 'X-API-Key: pl_9t13oLOZ9U4d2xQVnSZJXr1Kz7pta8-k' \
   -d '{"url":"https://www.linkedin.com/in/tushargoyal07/"}'
 ```
 
@@ -316,7 +315,7 @@ Reviewer curl:
 ```bash
 curl -sS -X POST https://profile-lens.onrender.com/v1/profiles \
   -H 'Content-Type: application/json' \
-  -H 'X-API-Key: pl_9t13oLOZ9U4d2xQVnSZJXr1Kz7pta8-k' \
+
   -d '{"url":"https://www.linkedin.com/in/tushargoyal07/"}'
 ```
 
